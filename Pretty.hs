@@ -1,7 +1,8 @@
-module Lisp.Pretty ( pretty ) where
+module HLisp.Pretty ( pretty ) where
 
-import Lisp.T
+import HLisp.T
 
+{-
 pretty t = case t of
   SymT s   -> s
   StrT s   -> "\"" ++ s ++ "\""
@@ -12,3 +13,4 @@ pretty t = case t of
       prettyR c@(ConT _ _) = " " ++ (init $ tail $ pretty c)
       prettyR (SymT "nil") = ""
       prettyR r            = " . " ++ pretty r
+-}

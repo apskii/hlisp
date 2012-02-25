@@ -1,4 +1,4 @@
-module Lisp.T ( T(..) ) where
+module HLisp.T ( T(..) ) where
 
 data T = SymT String
        | StrT String

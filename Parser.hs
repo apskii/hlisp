@@ -1,53 +1,33 @@
-module Lisp.Parser ( parse ) where
+module HLisp.Parser ( parse ) where
 
-import Lisp.T
+import HLisp.T
+
+import Data.Function.Pointless
+import Control.Applicative hiding ( (<|>), many )
 
 import Text.Parsec hiding ( parse )
 import Text.Parsec.String
 
-biTrim = between spaces spaces
+(~|~)  = (() <$) .: (<|>)
 
-pA <!> pB = (pA >> return ())
-        <|> (pB >> return ())
+strLit = StrT <$> (char '"' *> many (noneOf "\"") <* char '"')
 
-strLit = do s <- between (char '"') (char '"')
-                         (many $ noneOf "\"")
-            return (StrT s)
+chrLit = ChrT <$> (string "#\\" *> anyChar)
 
-chrLit = do string "#\\"
-            c <- anyChar            
-            return (ChrT c)
-            
-intLit = do sign   <- option ' ' (char '-')
-            digits <- many1 digit
-            lookAhead (space <!> oneOf "()" <!> eof)
-            return $ IntT $ read (sign : digits)
+intLit = IntT . read .: (:) <$> option ' ' (char '-') <*> many1 digit
+                            <*  lookAhead (space ~|~ oneOf "()" ~|~ eof)
 
-symbol = do s <- many1 (noneOf "() \t")
-            return (SymT s)
+symbol = SymT <$> many1 (noneOf "() \t")
 
-atom = biTrim (strLit <|> chrLit <|> try intLit <|> symbol)
+atom   = strLit <|> chrLit <|> try intLit <|> symbol
 
-expr = biTrim
-     $ do char '('
-          xs <- do qs <- char '\'' `sepEndBy` spaces
-                   x  <- atom <|> expr
-                   return $ foldr (\q a -> LisT [q,a]) x
-                          $ replicate (length qs) (SymT "quote")
-                `sepBy` spaces
-          char ')'
-          return (LisT xs)
+expr   = LisT <$> (char '(' *> (form `sepBy` spaces) <* char ')')
+
+quoted = LisT . (SymT "quote" :) . (:[]) <$> (char '\'' *> spaces *> form)
+
+form   = quoted <|> expr <|> atom
+
+parse  = either (error . show) id . runP top () ""
+  where top = many (spaces *> form <* spaces)
 
 parse :: String -> [T]
-parse = either (error . show) id
-      . runP (many $ expr <|> atom) () ""
-
-{- I've decided to throw dotted pairs away!
-     They are really ugly shit for save-one-cons bytefuckers.
-
-  where    
-    pcons (SymT ".") (ConT x (SymT "nil")) = x
-    pcons (SymT ".") _                     = error "Illegal place for dot!"
-    pcons x          y                     = ConT x y    
-    nil                                    = SymT "nil"
--}

@@ -1,8 +1,8 @@
 {-# LANGUAGE ViewPatterns, DeriveDataTypeable, FlexibleInstances #-}
-module Lisp.Eval where
+module HLisp.Eval where
 
-import Lisp.T
-import Lisp.Parser
+import HLisp.T
+import HLisp.Parser
 
 import Prelude hiding ( lookup )
 import Data.Typeable

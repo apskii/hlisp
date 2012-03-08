@@ -1,4 +1,4 @@
-module HLisp.Parser ( parse ) where
+module HLisp.Parser ( parse, form ) where
 
 import HLisp.T
 
@@ -14,8 +14,8 @@ strLit = StrT <$> (char '"' *> many (noneOf "\"") <* char '"')
 
 chrLit = ChrT <$> (string "#\\" *> anyChar)
 
-intLit = IntT . read .: (:) <$> option ' ' (char '-') <*> many1 digit
-                            <*  lookAhead (space ~|~ oneOf "()" ~|~ eof)
+intLit = IntT .: (:) <$> option ' ' (char '-') <*> many1 digit
+                     <*  lookAhead (space ~|~ oneOf "()" ~|~ eof)
 
 symbol = SymT <$> many1 (noneOf "() \t")
 
@@ -27,7 +27,7 @@ quoted = LisT . (SymT "quote" :) . (:[]) <$> (char '\'' *> spaces *> form)
 
 form   = quoted <|> expr <|> atom
 
-parse  = either (error . show) id . runP top () ""
-  where top = many (spaces *> form <* spaces)
+parse p = either (error . show) id . runP top () ""
+  where top = many (spaces *> p <* spaces)
 
-parse :: String -> [T]
+parse :: Parser T -> String -> [T]

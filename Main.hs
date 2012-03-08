@@ -5,6 +5,6 @@ import HLisp.Parser
 
 -- import Lisp.Pretty
 
-main = parse
+main = parse stdParser
      $ "(define (1+ x)\
        \  (+ 1 x))"

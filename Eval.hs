@@ -1,55 +1,40 @@
-{-# LANGUAGE ViewPatterns, DeriveDataTypeable, FlexibleInstances #-}
+{-# LANGUAGE ViewPatterns, DeriveDataTypeable, FlexibleInstances,
+             TemplateHaskell, QuasiQuotes #-}
 module HLisp.Eval where
 
 import HLisp.T
+import HLisp.Id
+import HLisp.Env
 import HLisp.Parser
 
 import Prelude hiding ( lookup )
+
+import Data.Maybe
 import Data.Typeable
 
 import Control.Arrow
-import Control.Exception
+-- import Control.Exception
 
-import qualified Data.Map as M
 
--- Exception types
-data LispException = ArgEx  String
-                   | FormEx String
-                   | TypeEx String
-                   deriving (Show, Typeable)
 
-instance Exception LispException
-
--- Basic exceptions utility functions
-wrongArgsCount s = ArgEx  $ "In call of " ++ s ++ " - wrong args count!"
-wrongArgType   s = TypeEx $ "In call of " ++ s ++ " - wrong arg type!"
-t `isNotA` s   = ArgEx (show t ++ " is not a " ++ s ++ "!")
-
--- Environment
-class Env e where
-  insert   :: String -> T -> e -> e
-  lookup   :: String -> e -> Maybe T
-  fromList :: [(String,T)] -> e
-
-instance Env (M.Map String T) where
-  insert   = M.insert
-  lookup   = M.lookup
-  fromList = M.fromList
-
-nilEnv :: M.Map String T
+-- Startup environment
+nilEnv :: Env T
 nilEnv = fromList $ map selfE ["\\","+","-","*","/",":"]
   where selfE x = (x, SymT x)
 
+-- Transformers stack
+type Eval = ErrorT LispErr (ReaderT (Env T) Identity)
+runEval = runIdentity . runReaderT nilEnv . runErrorT
+
 -- Evaluator
+eval :: T -> Eval T
 
-eval :: (Monad m, Env e) => e -> T -> m T
-
-eval _ (LisT (SymT "quote" : xs))
-  | null xs || not (null (tail xs)) = throw (wrongArgsCount "quote")
+eval (LisT (SymT "quote" : xs))
+  | null xs || not (null (tail xs)) = throwError (ArgcErr "quote" Nothing (Just 1))
   | otherwise                       = return (head xs)
 
-eval _ (LisT (SymT "λ" : xs))
-  | null xs || null (tail xs) = throw (FormEx "Lambda must have at least one arg and body!")
+eval (LisT (SymT "λ" : xs))
+  | null xs || null (tail xs) = throwError (ArgcErr "λ" Just)
   | otherwise                 = return $ foldr mkLam (last xs) (init xs)
   where
     mkLam (SymT s) t = LamT s t

@@ -2,9 +2,7 @@
              TemplateHaskell, QuasiQuotes #-}
 module HLisp.Eval where
 
-import HLisp.T
-import HLisp.Id
-import HLisp.Env
+import HLisp.Types
 import HLisp.Parser
 
 import Prelude hiding ( lookup )
@@ -16,9 +14,8 @@ import Control.Arrow
 -- import Control.Exception
 
 
-
 -- Startup environment
-nilEnv :: Env T
+nilEnv :: Env
 nilEnv = fromList $ map selfE ["\\","+","-","*","/",":"]
   where selfE x = (x, SymT x)
 
@@ -34,7 +31,7 @@ eval (LisT (SymT "quote" : xs))
   | otherwise                       = return (head xs)
 
 eval (LisT (SymT "λ" : xs))
-  | null xs || null (tail xs) = throwError (ArgcErr "λ" Just)
+  | null xs || null (tail xs) = throwError (ArgcErr "Î»" Just)
   | otherwise                 = return $ foldr mkLam (last xs) (init xs)
   where
     mkLam (SymT s) t = LamT s t
@@ -76,10 +73,10 @@ run code = print =<< (eval nilEnv $ head $ parse code)
 t1 = run "(: 1 2 3 4 5 6 7 8 9 ())"
 -- > LisT [IntT 1,IntT 2,IntT 3,IntT 4,IntT 5,IntT 6,IntT 7,IntT 8,IntT 9]
 
-t2 = run "(: (λ x x) 7 '(8 9 10))"
+t2 = run "(: (Î» x x) 7 '(8 9 10))"
 -- > LisT [LamT "x" (SymT "x"),IntT 7,IntT 8,IntT 9,IntT 10]
 
-t3 = run "((λ λ (λ λ)) λ)"
+t3 = run "((Î» Î» (Î» Î»)) Î»)"
 
 -- eval (ConT (SymT f@"car") t) = case t of
 

@@ -93,8 +93,6 @@ eval0 x = return x
 
 apply (LisT (x : xs)) ys = apply x (xs ++ ys)
 
--- apply s@(SymT _) [x] = return $ LisT [s, x]
-
 apply (SymT s) xs@(length -> argc)
   | argc < arity = return $ LisT (SymT s : xs)
   | otherwise    = f xs
@@ -136,11 +134,11 @@ symTy = SymT (#)
 
 infErr fn ts@(length -> tc) xs@(length -> argc)
   | tc /= argc = throwError $ ArgcErr fn argc (ArgcE tc)
-  | otherwise  = case find snd $ zipWith (\t a -> ((t,a), a `is` t)) ts xs of
+  | otherwise  = case find snd $ zipWith (\t a -> ((t,a), a `isnt` t)) ts xs of
     Just ((t,a), _) -> throwError $ ArgTyErr fn t a
     Nothing         -> throwError $ OtherErr "Incorrect error! :)"
   where
-    is obj ty = toConstr obj /= toConstr ty
+    isnt obj ty = toConstr obj /= toConstr ty
 
 bLam xs = eval0 $ LisT (SymT "λ" : xs) -- kinda black sorcery
 

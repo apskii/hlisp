@@ -1,14 +1,18 @@
-{-# LANGUAGE GADTs, QuasiQuotes #-}
-module HLisp.Types ( T(..), Id, Env, lookup, extend, empty ) where
+{-# LANGUAGE GADTs, QuasiQuotes, NoMonomorphismRestriction, DeriveDataTypeable #-}
+module HLisp.Types 
+       ( T(..), typeOf, Id
+       , Env, lookup, extend, empty, fromList
+       , ArgcQ(..), LispErr(..)
+       ) where
 
 import HLisp.Pretty
 
-import qualified Data.Map as M
 import Prelude hiding ( lookup )
 
-import GHC.Read
-import Text.Read.Lex
-import Text.ParserCombinators.ReadPrec
+import qualified Data.Map as M
+import Data.Data hiding ( typeOf )
+import Data.List ( intercalate )
+
 import Text.InterpolatedString.Perl6
 
 import Control.Monad.Error
@@ -20,7 +24,23 @@ data T = SymT Id
        | ChrT Char
        | LisT [T]
        | CloT Env Id T
-       deriving (Eq, Show, Read)
+       deriving (Eq, Show, Read, Typeable, Data)
+
+instance Pretty T where
+  pretty (SymT s)     = s
+  pretty (StrT s)     = "\"" ++ s ++ "\""
+  pretty (IntT i)     = show i
+  pretty (ChrT c)     = show c
+  pretty (LisT xs)    = "(" ++ intercalate " " (map pretty xs) ++ ")"
+  pretty (CloT e s t) = [qq|(#λ $s {pretty t})|]
+
+typeOf t = case t of
+  (SymT _)     -> "Symbol"
+  (StrT _)     -> "String"
+  (IntT _)     -> "Integer"
+  (ChrT _)     -> "Char"
+  (LisT _)     -> "List"
+  (CloT _ _ _) -> "Function"
 
 -- Identifiers
 type Id = String
@@ -28,75 +48,53 @@ type Id = String
 -- Environment
 type Env = M.Map Id T
 
-lookup :: Id -> Env -> Maybe T
-lookup = M.lookup
+lookup   = M.lookup
+extend   = M.insert
+empty    = M.empty
+fromList = M.fromList
 
-extend :: Id -> T -> Env -> Env
-extend = M.insert
-
-empty = M.empty
+-- Type for specifying relative args count
+data ArgcQ = ArgcE  Integer
+           | ArgcGE Integer
+           | ArgcR  Integer Integer
+           deriving (Eq, Show, Read)
+             
+instance Pretty ArgcQ where
+  pretty (ArgcE  n)  = [qq|exactly $n|]
+  pretty (ArgcGE n)  = [qq|at least $n|]
+  pretty (ArgcR s e) = [qq|from $s to $e|]
 
 -- Errors
-data LispErr = ArgcErr  Id Integer String
-             | ArgTyErr Id Id T
+data LispErr = ArgcErr Id Integer ArgcQ
+             | ArgTyErr Id T T
+             | UnboundSymErr Id
+             | NonApplicableErr T
+             | OtherErr String
              deriving (Eq, Show, Read)
+
+instance Error LispErr where
+  strMsg = OtherErr
 
 wrongArgc  = "Wrong args count in call of"
 wrongArgTy = "Wrong arg type in call of"
 
 instance Pretty LispErr where  
   
-  pretty (ArgcErr fn gN eS) =
-    [qc| $wrongArgc `$fn': $gN given, while expecting $eS. |]
+  pretty (ArgcErr fn g e) = [qq|
+    $wrongArgc `{fn}': $g given, {pretty e} expected. |]
   
-  pretty (ArgTyErr fn e t) =
-    [qc| $wrongArgTy `$fn': expected `$e' in
-           $(pretty t) |]
+  pretty (ArgTyErr fn e t) = [qq|
+    $wrongArgTy `{fn}':
+      `{typeOf t}' given, `{typeOf e}' expected
+    in
+      {pretty t} |]
 
+  pretty (UnboundSymErr s) = [qq|
+    Symbol `{s}' is unbound! |]
 
--- Builtins
-data BuiltIn where
-  BuiltIn :: (MonadError LispErr m) 
-          => Id -> (T -> m T) 
-          -> BuiltIn
+  pretty (NonApplicableErr t) = [qq|
+    Tried to apply non-applicable value:
+      {pretty t} |]
 
-instance Eq BuiltIn where
-  (BuiltIn fnA _) == (BuiltIn fnB _) = fnA == fnB
-
-instance Show BuiltIn where
-  show (BuiltIn fn _) = "BuiltIn " ++ fn
-
-instance Read BuiltIn where
-  readPrec = prec 10 
-           $ do Ident "BuiltIn" <- lexP
-                fn <- step readPrec
-                return $ BuiltIn fn (getBuiltIn fn)
-
-lamBuiltIn f = BuiltIn "λ-built-in" f
-                
-getBuiltIn fn = case fn of
-  "type-of" -> bTypeOf
-  "+"       -> bSum
-
-bTypeOf = return . typeOf
-
-bSum (IntT x) = return (BuiltIn plus)
-  where plus (IntT y) = return $ IntT (x + y)
-        plus t        = throwError $ ArgTyErr "+" 2 "integer" t
-        
-bSum t = throwError $ ArgTyErr "+" 1 "" t
-
-
-{-
-data T where 
-  SymT :: Id          -> T
-  StrT :: String      -> T
-  IntT :: Integer     -> T
-  ChrT :: Char        -> T
-  LisT :: [T]         -> T
-  CloT :: Env         -> T
-  FunT :: BuiltIn -> T-}
-
--- deriving instance Show T
--- deriving instance Read T
--- deriving instance   Eq T
+  pretty (OtherErr s) = [qq|
+    $s |]

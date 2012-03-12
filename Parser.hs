@@ -1,12 +1,13 @@
 module HLisp.Parser ( parse, form ) where
 
-import HLisp.T
+import HLisp.Types
 
 import Data.Function.Pointless
 import Control.Applicative hiding ( (<|>), many )
 
 import Text.Parsec hiding ( parse )
 import Text.Parsec.String
+import Text.Parsec.Char
 
 (~|~)  = (() <$) .: (<|>)
 
@@ -14,20 +15,22 @@ strLit = StrT <$> (char '"' *> many (noneOf "\"") <* char '"')
 
 chrLit = ChrT <$> (string "#\\" *> anyChar)
 
-intLit = IntT .: (:) <$> option ' ' (char '-') <*> many1 digit
-                     <*  lookAhead (space ~|~ oneOf "()" ~|~ eof)
+intLit = IntT . read .: (:) <$> option ' ' (char '-') <*> many1 digit
+                            <*  lookAhead (space ~|~ oneOf "()" ~|~ eof)
 
-symbol = SymT <$> many1 (noneOf "() \t")
+symbol = SymT <$> many1 (noneOf "() \n\t")
 
 atom   = strLit <|> chrLit <|> try intLit <|> symbol
 
-expr   = LisT <$> (char '(' *> (form `sepBy` spaces) <* char ')')
+expr   = LisT <$> (char '(' *> (form `sepEndBy` spaces) <* char ')')
 
 quoted = LisT . (SymT "quote" :) . (:[]) <$> (char '\'' *> spaces *> form)
 
 form   = quoted <|> expr <|> atom
 
+parse :: Parser T -> String -> [T]
 parse p = either (error . show) id . runP top () ""
   where top = many (spaces *> p <* spaces)
 
-parse :: Parser T -> String -> [T]
+-- and, at last, lets help type inferer a little bit (:
+_ = parse form

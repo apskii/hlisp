@@ -20,6 +20,8 @@ import Control.Monad.Identity
 import Control.Monad.Error
 import Control.Monad.State
 
+import Control.Applicative
+
 import Text.InterpolatedString.Perl6
 
 length = genericLength
@@ -32,11 +34,6 @@ local env m = do
   put oldEnv
   return x
 
--- Startup environment
-nilEnv :: Env
-nilEnv = fromList $ map selfEvaluated ["λ","+","-","*","/",":","=","<","hd","tl"]
-  where selfEvaluated x = (x, SymT x)
-
 -- Transformers stack
 type Eval = ErrorT LispErr (StateT Env Identity)
 runEval = runIdentity . flip evalStateT nilEnv . runErrorT
@@ -45,12 +42,12 @@ runEval = runIdentity . flip evalStateT nilEnv . runErrorT
 eval0 :: T -> Eval T
 
 eval0 (LisT (SymT "quote" : xs)) = case xs of
-  [x]              -> return x
-  (length -> argc) -> throwError $ ArgcErr "quote" argc (ArgcE 1)
+  [x] -> return x
+  _   -> throwError $ ArgcErr "quote" (length xs) (ArgcE 1)
 
 eval0 t@(LisT (SymT "λ" : xs))
   | length xs < 2 = return t
-  | otherwise     = case xs of    
+  | otherwise     = case xs of
     SymT s : ys -> get >>= \e -> return $ CloT e s (foldr1 mkLam ys)
     t      : _  -> throwError $ ArgTyErr "λ" symTy t
   where
@@ -62,7 +59,7 @@ eval0 (LisT (SymT "?" : xs)) = case xs of
     eval0 $ case c' of
       LisT []   -> f
       otherwise -> t
-      
+
   [c,t] -> eval0 $ LisT [SymT "?", c, t, LisT []]
   _     -> throwError $ ArgcErr "?" (length xs) (ArgcR 2 3)
 
@@ -72,11 +69,11 @@ eval0 (LisT (SymT "def" : xs)) = case xs of
     let y = case x of
               CloT e s b -> CloT (extend name y e) s b
               _          -> x
-    modify (extend name y)          
+    modify (extend name y)
     return (SymT name)                         
     
-  [t,         _]   -> throwError $ ArgTyErr "def" symTy t
-  (length -> argc) -> throwError $ ArgcErr "def" argc (ArgcE 2)
+  [t, _] -> throwError $ ArgTyErr "def" symTy t
+  _      -> throwError $ ArgcErr "def" (length xs) (ArgcE 2)
 
 eval0 (SymT s) = do
   e <- get
@@ -93,11 +90,23 @@ eval0 x = return x
 
 apply (LisT (x : xs)) ys = apply x (xs ++ ys)
 
+{-
+apply (SymT s) xs@(length -> argc) =
+  case lookup s builtIns of 
+    Just (arity, f) | argc < arity -> return $ LisT (SymT s : xs)
+                    | otherwise    -> f xs
+    Nothing -> do
+      e <- get
+      case lookup s e of
+        Just y  -> apply y xs
+        Nothing -> throwError (UnboundSymErr s)
+-}          
+
 apply (SymT s) xs@(length -> argc)
   | argc < arity = return $ LisT (SymT s : xs)
-  | otherwise    = f xs
+  | otherwise = f xs
   where
-    (arity, f) = lookup s builtIns 
+    (arity, f) = lookup s builtIns
                  ?: (0, \_ -> throwError (UnboundSymErr s))
 
 apply (CloT e s b) (x : xs)
@@ -125,6 +134,11 @@ builtIns = fromList [ ("λ", (2, bLam))
                     
                     , ("type-of", (1, bTypeOf))
                     ]
+           
+-- Startup environment
+nilEnv :: Env
+nilEnv = fromList $ map selfEvaluated ("T" : syms builtIns)
+  where selfEvaluated x = (x, SymT x)
 
 (#) = undefined
 
@@ -158,11 +172,11 @@ bCons [hd, LisT tl]    = return $ LisT (hd : tl)
 bCons [_,  t      ]    = throwError $ ArgTyErr ":" lisTy t
 bCons (length -> argc) = throwError $ ArgcErr ":" argc (ArgcE 2)
 
-bEq [a, b] | a == b    = return a
+bEq [a, b] | a == b    = return $ SymT "T"
            | otherwise = return $ LisT []
 
 bLT [IntT a, IntT b]
-  | a < b     = return $ IntT b
+  | a < b     = return $ SymT "T"
   | otherwise = return $ LisT []
 bLT xs        = infErr "<" [intTy, intTy] xs
 
@@ -184,7 +198,10 @@ evalString = either (error . pretty) (pretty . last)
 
 test = do hSetEncoding stdout utf8
           putStrLn $ evalString [q|
-
+                               
+  (def id
+    (λ x x))
+                                 
   (def map 
     (λ f xs
       (? xs (: (f (hd xs))
@@ -199,15 +216,90 @@ test = do hSetEncoding stdout utf8
       (? (<= s e)
          (: s (.. (+ 1 s) e)))))
 
-  (def $
-    (λ x f
-      (f x)))
+  (def @
+    (λ f x y
+      (f y x)))
 
   (def .
     (λ f g x
       (f (g x))))
 
-  (map ($ (.. 5 8))
-       (map (. map +) '(1 2 3)))
+  (def .:
+    (λ f g x y
+      (f (g x y))))
+
+  (def not (= ()))
+
+  (def /= (.: not =))
+
+  (def is
+    (λ t
+      (. (= t)
+         type-of)))
+
+  (def isnt
+    (λ t
+      (. (/= t)
+         type-of)))
+
+  (def Atom?     (isnt 'List))
+  (def Function? (is 'Function))
+
+  (def foldl
+    (λ f s xs
+      (? xs (foldl f
+              (f s (hd xs)) 
+              (tl xs))
+            s)))
+
+  (def foldl1
+    (λ f xs
+      (? xs (foldl f
+              (hd xs)
+              (tl xs)))))
+
+  (def reverse
+    (λ xs (foldl (@ :) () xs)))
+
+  (def [ '[)
+  (def ] '])
+
+  (def <~
+    (λ f m x
+      ((λ y
+         (? (Function? y)
+            (<~ f y)
+            (f y)))
+       (m x))))
+
+  (def vararg-collector/r
+    (λ acc x
+      (? (= x ])
+         (reverse acc)
+         (vararg-collector/r (: x acc)))))
+
+  (def vararg-collector/l
+    (λ acc n x
+      (? (= x [)
+         (vararg-collector/r ())
+         (? (< n 2)
+            (reverse (: x acc))
+            (vararg-collector/l
+              (: x acc)
+              (- n 1))))))
+
+  (def vararg-builder
+    (λ f n
+      (<~ f (vararg-collector/l () n))))
+
+  (def ~+ +)
+
+  (def + (vararg-builder (foldl1 ~+) 2))
+
+  (def t1 (+ [ 1 2 3))
+  (def t2 (t1 3 4 5 6))
+  (def t3 (t2 7 8 9 ]))
+
+  (+ 2 t3)
 
 |]

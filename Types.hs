@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs, QuasiQuotes, NoMonomorphismRestriction, DeriveDataTypeable #-}
 module HLisp.Types 
        ( T(..), typeOf, Id
-       , Env, lookup, extend, empty, fromList
+       , Env, lookup, extend, empty, fromList, syms
        , ArgcQ(..), LispErr(..)
        ) where
 
@@ -52,6 +52,7 @@ lookup   = M.lookup
 extend   = M.insert
 empty    = M.empty
 fromList = M.fromList
+syms     = M.keys
 
 -- Type for specifying relative args count
 data ArgcQ = ArgcE  Integer

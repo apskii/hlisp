@@ -237,10 +237,7 @@ test = do hSetEncoding stdout utf8
       (. (= t)
          type-of)))
 
-  (def isnt
-    (λ t
-      (. (/= t)
-         type-of)))
+  (def isnt (.: not is))
 
   (def Atom?     (isnt 'List))
   (def Function? (is 'Function))
@@ -301,5 +298,4 @@ test = do hSetEncoding stdout utf8
   (def t3 (t2 7 8 9 ]))
 
   (+ 2 t3)
-
 |]

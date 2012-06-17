@@ -3,7 +3,6 @@ module HLisp.Eval ( eval, evalString ) where
 
 import HLisp.Types
 import HLisp.Parser
-import HLisp.Pretty
 
 import Prelude hiding ( lookup, length, foldr, foldr1 )
 

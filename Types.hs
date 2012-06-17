@@ -3,9 +3,8 @@ module HLisp.Types
        ( T(..), typeOf, Id
        , Env, lookup, extend, empty, fromList, syms
        , ArgcQ(..), LispErr(..)
+       , Pretty(..)
        ) where
-
-import HLisp.Pretty
 
 import Prelude hiding ( lookup )
 
@@ -25,6 +24,9 @@ data T = SymT Id
        | LisT [T]
        | CloT Env Id T
        deriving (Eq, Show, Read, Typeable, Data)
+
+class Pretty a where
+  pretty :: a -> String
 
 instance Pretty T where
   pretty (SymT s)     = s

@@ -1,5 +1,4 @@
-{-# LANGUAGE ViewPatterns, DeriveDataTypeable, FlexibleInstances,
-             TemplateHaskell, QuasiQuotes #-}
+{-# LANGUAGE ViewPatterns #-}
 module HLisp.Eval ( eval, evalString ) where
 
 import HLisp.Types
@@ -7,8 +6,6 @@ import HLisp.Parser
 import HLisp.Pretty
 
 import Prelude hiding ( lookup, length, foldr, foldr1 )
-
-import System.IO
 
 import Data.Data hiding ( typeOf )
 import Data.List ( genericLength )
@@ -22,11 +19,10 @@ import Control.Monad.State
 
 import Control.Applicative
 
-import Text.InterpolatedString.Perl6
-
 length = genericLength
 m ?: x = maybe x id m
 
+local :: MonadState s m => s -> m b -> m b
 local env m = do
   oldEnv <- get 
   put env
@@ -90,34 +86,25 @@ eval0 x = return x
 
 apply (LisT (x : xs)) ys = apply x (xs ++ ys)
 
-{-
-apply (SymT s) xs@(length -> argc) =
-  case lookup s builtIns of 
-    Just (arity, f) | argc < arity -> return $ LisT (SymT s : xs)
-                    | otherwise    -> f xs
-    Nothing -> do
-      e <- get
-      case lookup s e of
-        Just y  -> apply y xs
-        Nothing -> throwError (UnboundSymErr s)
--}          
-
-apply (SymT s) xs@(length -> argc)
-  | argc < arity = return $ LisT (SymT s : xs)
-  | otherwise = f xs
+apply (SymT s) xs
+  | length xs < arity = return $ LisT (SymT s : xs)
+  | otherwise         = f xs
   where
     (arity, f) = lookup s builtIns
-                 ?: (0, \_ -> throwError (UnboundSymErr s))
+              ?: (0, \_ -> throwError (UnboundSymErr s))
 
 apply (CloT e s b) (x : xs)
   = local (extend s x e)
   $ eval0 b >>= case xs 
                   of [] -> return
-                     ys -> flip apply xs
+                     xs -> flip apply xs
 
 apply t _ = throwError (NonApplicableErr t)
 
 eval = runEval . eval0
+
+evalString = either (error . pretty) (pretty . last)
+           . runEval . sequence . map eval0 . parse form
 
 -- Built-In's
 builtIns = fromList [ ("λ", (2, bLam))
@@ -170,7 +157,7 @@ bDiv xs               = infErr "/" [intTy, intTy] xs
 
 bCons [hd, LisT tl]    = return $ LisT (hd : tl)
 bCons [_,  t      ]    = throwError $ ArgTyErr ":" lisTy t
-bCons (length -> argc) = throwError $ ArgcErr ":" argc (ArgcE 2)
+bCons xs               = throwError $ ArgcErr ":" (length xs) (ArgcE 2)
 
 bEq [a, b] | a == b    = return $ SymT "T"
            | otherwise = return $ LisT []
@@ -190,112 +177,3 @@ bTl xs            = infErr "tl" [lisTy] xs
 
 bTypeOf [t]              = return $ SymT (typeOf t)
 bTypeOf (length -> argc) = throwError $ ArgcErr "type-of" argc (ArgcE 1)
-
-
-evalString = either (error . pretty) (pretty . last)
-           . runEval . sequence . map eval0 . parse form
-
-
-test = do hSetEncoding stdout utf8
-          putStrLn $ evalString [q|
-                               
-  (def id
-    (λ x x))
-                                 
-  (def map 
-    (λ f xs
-      (? xs (: (f (hd xs))
-               (map f (tl xs))))))
-
-  (def <=
-    (λ a b
-      (< a (+ 1 b))))
-  
-  (def ..
-    (λ s e
-      (? (<= s e)
-         (: s (.. (+ 1 s) e)))))
-
-  (def @
-    (λ f x y
-      (f y x)))
-
-  (def .
-    (λ f g x
-      (f (g x))))
-
-  (def .:
-    (λ f g x y
-      (f (g x y))))
-
-  (def not (= ()))
-
-  (def /= (.: not =))
-
-  (def is
-    (λ t
-      (. (= t)
-         type-of)))
-
-  (def isnt (.: not is))
-
-  (def Atom?     (isnt 'List))
-  (def Function? (is 'Function))
-
-  (def foldl
-    (λ f s xs
-      (? xs (foldl f
-              (f s (hd xs)) 
-              (tl xs))
-            s)))
-
-  (def foldl1
-    (λ f xs
-      (? xs (foldl f
-              (hd xs)
-              (tl xs)))))
-
-  (def reverse
-    (λ xs (foldl (@ :) () xs)))
-
-  (def [ '[)
-  (def ] '])
-
-  (def <~
-    (λ f m x
-      ((λ y
-         (? (Function? y)
-            (<~ f y)
-            (f y)))
-       (m x))))
-
-  (def vararg-collector/r
-    (λ acc x
-      (? (= x ])
-         (reverse acc)
-         (vararg-collector/r (: x acc)))))
-
-  (def vararg-collector/l
-    (λ acc n x
-      (? (= x [)
-         (vararg-collector/r ())
-         (? (< n 2)
-            (reverse (: x acc))
-            (vararg-collector/l
-              (: x acc)
-              (- n 1))))))
-
-  (def vararg-builder
-    (λ f n
-      (<~ f (vararg-collector/l () n))))
-
-  (def ~+ +)
-
-  (def + (vararg-builder (foldl1 ~+) 2))
-
-  (def t1 (+ [ 1 2 3))
-  (def t2 (t1 3 4 5 6))
-  (def t3 (t2 7 8 9 ]))
-
-  (+ 2 t3)
-|]

@@ -11,6 +11,7 @@ import Control.Monad.Error
 
 import Prelude hiding ( read, readFile )
 import Prelude.Unicode
+import Data.List ( delete )
 
 import System.Exit
 import System.IO.UTF8 ( readFile )
@@ -26,8 +27,11 @@ infixr 0 #
 
 -- :Command executor
 execCommand [qc]       | qc ∈ [":quit", ":q"] = liftIO exitSuccess
-execCommand [lc, file] | lc ∈ [":load", ":l"] = liftIO $ either (error ∘ show) id <$> parse
-                                                           <$> readFile file `catchIOError` \e → [] <$ print e
+execCommand [lc, path] | lc ∈ [":load", ":l"] = liftIO $
+  either (error ∘ show) id
+    <$> parse
+    <$> readFile (filter (≢ '"') path)
+          `catchIOError` \e → [] <$ print e
                                                                                              
 execCommand _ = [] <$ liftIO (putStrLn "Invalid command!")
 

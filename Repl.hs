@@ -9,8 +9,7 @@ import Control.Applicative
 import Control.Monad.Trans
 import Control.Monad.Error
 
-import qualified Prelude as P
-import Prelude hiding ( read, readFile ) -- , print, (.), getLine, readFile, putStr, putStrLn, words, head )
+import Prelude hiding ( read, readFile )
 import Prelude.Unicode
 
 import System.Exit

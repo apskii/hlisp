@@ -137,7 +137,7 @@ bCons [hd, LisT tl]    = return $ LisT (hd : tl)
 bCons [_,  t      ]    = error $ ArgTyErr ":" lisTy t
 bCons xs               = error $ ArgcErr ":" (len xs) (ArgcE 2)
 
-bEq [a, b] | a ≡ b    = return $ SymT "T"
+bEq [a, b] | a ≡ b     = return $ SymT "T"
            | otherwise = return $ LisT []
 
 bLT [IntT a, IntT b]

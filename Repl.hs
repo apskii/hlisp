@@ -27,8 +27,9 @@ infixr 0 #
 -- :Command executor
 execCommand [qc]       | qc ∈ [":quit", ":q"] = liftIO exitSuccess
 execCommand [lc, file] | lc ∈ [":load", ":l"] = liftIO $ either (error ∘ show) id <$> parse
-                                                            <$> readFile file `catchIOError` \e → [] <$ print e
-execCommand _                                  = [] <$ liftIO (putStrLn "Invalid command!")
+                                                           <$> readFile file `catchIOError` \e → [] <$ print e
+                                                                                             
+execCommand _ = [] <$ liftIO (putStrLn "Invalid command!")
 
 -- REPL
 read = liftIO (putStr "> ") >> readAdaptive ""
@@ -38,9 +39,9 @@ read = liftIO (putStr "> ") >> readAdaptive ""
       codeChunk ← liftIO getLine
       let code  = stripStart (prefix ++ codeChunk)
 
-      if | null code        → read
+      if | null code       → read
          | ':' ≡ head code → execCommand (words code)
-         | otherwise        → case (parse code) of
+         | otherwise       → case (parse code) of
            Left _ → case codeChunk of
              "" → liftIO (putStrLn "...broken input") >> read
              _  → readAdaptive code

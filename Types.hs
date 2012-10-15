@@ -51,6 +51,10 @@ subst var val term = transform term
         | var ≡ var' → abs
         | otherwise   → AbsT var' (transform term')
 
+      lam@(LisT (SymT "λ" : xs)) → if
+        | var ∈ init (map pretty xs) → lam
+        | otherwise                   → symApp "λ" (init xs ++ [transform (last xs)])
+
       q@(LisT (SymT "quote" : _)) → q
 
       LisT xs → LisT (map transform xs)

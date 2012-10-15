@@ -1,36 +1,36 @@
-module HLisp.Parser ( parse, form ) where
+{-# LANGUAGE UnicodeSyntax #-}
+module HLisp.Parser ( parse ) where
 
 import HLisp.Types
 
-import Data.Function.Pointless
+import Text.Parsec hiding ( parse )
+
+import Prelude.Unicode
 import Control.Applicative hiding ( (<|>), many )
 
-import Text.Parsec hiding ( parse )
-import Text.Parsec.String
-import Text.Parsec.Char
+infixl 8 ∘:
+(f ∘: g) x y = f (g x y)
 
-(~|~)  = (() <$) .: (<|>)
+(~|~)  = (() <$) ∘: (<|>)
 
 strLit = StrT <$> (char '"' *> many (noneOf "\"") <* char '"')
 
 chrLit = ChrT <$> (string "#\\" *> anyChar)
 
-intLit = IntT . read .: (:) <$> option ' ' (char '-') <*> many1 digit
+intLit = IntT ∘ read ∘: (:) <$> option ' ' (char '-') <*> many1 digit
                             <*  lookAhead (space ~|~ oneOf "()" ~|~ eof)
 
-symbol = SymT <$> many1 (noneOf "() \n\t")
+symbol = SymT <$> many1 (noneOf "() \n\t\r")
 
 atom   = strLit <|> chrLit <|> try intLit <|> symbol
 
-expr   = LisT <$> (char '(' *> (form `sepEndBy` spaces) <* char ')')
+expr   = LisT <$> (char '(' *> spaces *> (form `sepEndBy` spaces) <* char ')')
 
-quoted = LisT . (SymT "quote" :) . (:[]) <$> (char '\'' *> spaces *> form)
+quoted = LisT ∘ (SymT "quote" :) ∘ (:[]) <$> (char '\'' *> spaces *> form)
 
 form   = quoted <|> expr <|> atom
 
-parse :: Parser T -> String -> [T]
-parse p = either (error . show) id . runP top () ""
-  where top = many (spaces *> p <* spaces)
+top    = many (spaces *> form <* spaces)
 
--- and, at last, lets help type inferer a little bit (:
-_ = parse form
+parse ∷ String -> Either ParseError [T]
+parse = runParser top () ""

@@ -1,18 +1,18 @@
-{-# LANGUAGE GADTs, QuasiQuotes, NoMonomorphismRestriction, DeriveDataTypeable #-}
-module HLisp.Types 
-       ( T(..), typeOf, Id
+{-# LANGUAGE QuasiQuotes, NoMonomorphismRestriction, DeriveDataTypeable, LambdaCase, MultiWayIf, UnicodeSyntax #-}
+module HLisp.Types
+       ( T(..), symApp, subst, typeOf, Id
        , Env, lookup, extend, empty, fromList, syms
        , ArgcQ(..), LispErr(..)
        , Pretty(..)
        ) where
 
 import Prelude hiding ( lookup )
+import Prelude.Unicode
+import Text.InterpolatedString.Perl6
 
 import qualified Data.Map as M
+import Data.List hiding ( lookup )
 import Data.Data hiding ( typeOf )
-import Data.List ( intercalate )
-
-import Text.InterpolatedString.Perl6
 
 import Control.Monad.Error
 
@@ -22,27 +22,47 @@ data T = SymT Id
        | IntT Integer
        | ChrT Char
        | LisT [T]
-       | CloT Env Id T
+       | AbsT Id T
        deriving (Eq, Show, Read, Typeable, Data)
 
 class Pretty a where
-  pretty :: a -> String
+  pretty ∷ a → String
 
 instance Pretty T where
-  pretty (SymT s)     = s
-  pretty (StrT s)     = "\"" ++ s ++ "\""
-  pretty (IntT i)     = show i
-  pretty (ChrT c)     = show c
-  pretty (LisT xs)    = "(" ++ intercalate " " (map pretty xs) ++ ")"
-  pretty (CloT e s t) = [qq|(#λ $s {pretty t})|]
+  pretty = \case
+    SymT name  → name
+    StrT str   → "\"" ++ str ++ "\""
+    IntT int   → show int
+    ChrT chr   → show chr
+    LisT xs    → "(" ++ intercalate " " (map pretty xs) ++ ")"
+    AbsT var t → [qq|(λ $var {pretty t})|]
 
-typeOf t = case t of
-  (SymT _)     -> "Symbol"
-  (StrT _)     -> "String"
-  (IntT _)     -> "Integer"
-  (ChrT _)     -> "Char"
-  (LisT _)     -> "List"
-  (CloT _ _ _) -> "Function"
+symApp sym args = LisT (SymT sym : args)
+
+subst var val term = transform term
+  where        
+    transform = \case
+      
+      sym@(SymT name) → if
+        | name ≡ var → val
+        | otherwise   → sym
+
+      abs@(AbsT var' term') → if
+        | var ≡ var' → abs
+        | otherwise   → AbsT var' (transform term')
+
+      q@(LisT (SymT "quote" : _)) → q
+
+      LisT xs → LisT (map transform xs)
+      other   → other
+
+typeOf = \case
+  SymT _   → "Symbol"
+  StrT _   → "String"
+  IntT _   → "Integer"
+  ChrT _   → "Char"
+  LisT _   → "List"
+  AbsT _ _ → "Function"
 
 -- Identifiers
 type Id = String
@@ -63,9 +83,10 @@ data ArgcQ = ArgcE  Integer
            deriving (Eq, Show, Read)
              
 instance Pretty ArgcQ where
-  pretty (ArgcE  n)  = [qq|exactly $n|]
-  pretty (ArgcGE n)  = [qq|at least $n|]
-  pretty (ArgcR s e) = [qq|from $s to $e|]
+  pretty = \case
+    ArgcE  n   → [qq|exactly $n|]
+    ArgcGE n   → [qq|at least $n|]
+    ArgcR  s e → [qq|from $s to $e|]
 
 -- Errors
 data LispErr = ArgcErr Id Integer ArgcQ
@@ -81,23 +102,24 @@ instance Error LispErr where
 wrongArgc  = "Wrong args count in call of"
 wrongArgTy = "Wrong arg type in call of"
 
-instance Pretty LispErr where  
+instance Pretty LispErr where
+  pretty = \case
+    
+    ArgcErr fn g e → [qq|
+      $wrongArgc `{fn}': $g given, {pretty e} expected. |]
   
-  pretty (ArgcErr fn g e) = [qq|
-    $wrongArgc `{fn}': $g given, {pretty e} expected. |]
-  
-  pretty (ArgTyErr fn e t) = [qq|
-    $wrongArgTy `{fn}':
-      `{typeOf t}' given, `{typeOf e}' expected
-    in
-      {pretty t} |]
+    ArgTyErr fn e t → [qq|
+      $wrongArgTy `{fn}':
+        `{typeOf t}' given, `{typeOf e}' expected
+      in
+        {pretty t} |]
 
-  pretty (UnboundSymErr s) = [qq|
-    Symbol `{s}' is unbound! |]
+    UnboundSymErr s → [qq|
+      Symbol `{s}' is unbound! |]
 
-  pretty (NonApplicableErr t) = [qq|
-    Tried to apply non-applicable value:
-      {pretty t} |]
+    NonApplicableErr t → [qq|
+      Tried to apply non-applicable value:
+        {pretty t} |]
 
-  pretty (OtherErr s) = [qq|
-    $s |]
+    OtherErr s → [qq|
+      $s |]

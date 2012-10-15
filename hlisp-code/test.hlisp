@@ -1,0 +1,16 @@
+(def id
+  (λ x x))
+                                 
+(def map 
+  (λ f xs
+    (? xs (: (f (hd xs))
+             (map f (tl xs))))))
+
+(def ≤
+  (λ a b
+    (< a (+ 1 b))))
+  
+(def ..
+  (λ s e
+    (? (≤ s e)
+       (: s (.. (+ 1 s) e)))))

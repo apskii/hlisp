@@ -1,0 +1,60 @@
+
+(def id
+  (λ x x))
+                                 
+(def map 
+  (λ f xs
+    (? xs (: (f (hd xs))
+             (map f (tl xs))))))
+
+(def ≤
+  (λ a b
+    (< a (+ 1 b))))
+  
+(def ..
+  (λ s e
+    (? (≤ s e)
+       (: s (.. (+ 1 s) e)))))
+
+(def @
+  (λ f x y
+    (f y x)))
+
+(def ∘
+  (λ f g x
+    (f (g x))))
+
+(def ∘:
+  (λ f g x y
+    (f (g x y))))
+
+(def not (= ()))
+
+(def /= (∘: not =))
+
+(def is
+  (λ t
+    (∘ (= t)
+       type-of)))
+
+(def isnt (∘: not is))
+
+(def Atom?     (isnt 'List))
+(def Function? (is 'Function))
+
+(def foldl
+  (λ f s xs
+    (? xs (foldl f
+            (f s (hd xs)) 
+            (tl xs))
+          s)))
+
+(def foldl1
+  (λ f xs
+    (? xs (foldl f
+            (hd xs)
+            (tl xs)))))
+
+(def reverse
+  (λ xs (foldl (@ :) () xs)))
+

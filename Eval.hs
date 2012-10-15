@@ -1,146 +1,125 @@
-{-# LANGUAGE ViewPatterns #-}
-module HLisp.Eval ( eval, evalString ) where
+{-# LANGUAGE NoMonomorphismRestriction, ViewPatterns, LambdaCase, UnicodeSyntax #-}
+module HLisp.Eval ( evalT, EvalT, runEvalT ) where
 
 import HLisp.Types
-import HLisp.Parser
 
-import Prelude hiding ( lookup, length, foldr, foldr1 )
+import Prelude hiding ( lookup, length, foldr, foldr1, error )
+import Prelude.Unicode
 
 import Data.Data hiding ( typeOf )
 import Data.List ( genericLength )
-import Data.Maybe
-import Data.Function
 import Data.Foldable
 
-import Control.Monad.Identity
+import Control.Applicative
 import Control.Monad.Error
 import Control.Monad.State
+import Control.Arrow
 
-import Control.Applicative
+-- Utilities
+len   = genericLength
+error = throwError
 
-length = genericLength
-m ?: x = maybe x id m
+-- Evaluation transformers stack
+type EvalT = ErrorT LispErr (StateT Env IO)
+runEvalT = flip evalStateT nilEnv ∘ runErrorT
 
-local :: MonadState s m => s -> m b -> m b
-local env m = do
-  oldEnv <- get 
-  put env
-  x <- m
-  put oldEnv
-  return x
+-- Term evaluator
+evalT ∷ T → EvalT T
 
--- Transformers stack
-type Eval = ErrorT LispErr (StateT Env Identity)
-runEval = runIdentity . flip evalStateT nilEnv . runErrorT
+evalT (LisT (SymT s : xs)) | s ∈ ["λ", "quote", "?" , "def"] = evalSF s xs
 
--- Evaluator
-eval0 :: T -> Eval T
+evalT (SymT s) = (lookup s <$> get) >>= \case
+  Just t  → return t
+  Nothing → error $ UnboundSymErr s
 
-eval0 (LisT (SymT "quote" : xs)) = case xs of
-  [x] -> return x
-  _   -> throwError $ ArgcErr "quote" (length xs) (ArgcE 1)
+evalT (LisT (x : xs)) = join $ apply <$> evalT x <*> mapM evalT xs
 
-eval0 t@(LisT (SymT "λ" : xs))
-  | length xs < 2 = return t
-  | otherwise     = case xs of
-    SymT s : ys -> get >>= \e -> return $ CloT e s (foldr1 mkLam ys)
-    t      : _  -> throwError $ ArgTyErr "λ" symTy t
+evalT x = return x
+
+-- Special form evaluator
+evalSF "λ" xs | len xs < 2 = return $ symApp "λ" xs
+
+evalSF "λ" (SymT s : xs) = return $ AbsT s (foldr1 mkLam xs)
   where
     mkLam s b = LisT [SymT "λ", s, b]
 
-eval0 (LisT (SymT "?" : xs)) = case xs of
-  [c,t,f] -> do
-    c' <- eval0 c
-    eval0 $ case c' of
-      LisT []   -> f
-      otherwise -> t
+evalSF "λ" (t : _) = error $ ArgTyErr "λ" symTy t
 
-  [c,t] -> eval0 $ LisT [SymT "?", c, t, LisT []]
-  _     -> throwError $ ArgcErr "?" (length xs) (ArgcR 2 3)
+evalSF "quote" [x] = return x
+evalSF "quote" xs  = error $ ArgcErr "quote" (len xs) (ArgcE 1)
 
-eval0 (LisT (SymT "def" : xs)) = case xs of
-  [SymT name, t] -> do 
-    x <- eval0 t
-    let y = case x of
-              CloT e s b -> CloT (extend name y e) s b
-              _          -> x
-    modify (extend name y)
-    return (SymT name)                         
-    
-  [t, _] -> throwError $ ArgTyErr "def" symTy t
-  _      -> throwError $ ArgcErr "def" (length xs) (ArgcE 2)
+evalSF "?" [c,t,f] = evalT c >>= \case
+  LisT []   → evalT f
+  otherwise → evalT t
+  
+evalSF "?" [c,t] = evalSF "?" [c, t, LisT []]
+evalSF "?" args  = error $ ArgcErr "?" (len args) (ArgcR 2 3)
 
-eval0 (SymT s) = do
-  e <- get
-  case lookup s e of
-    Just t  -> return t
-    Nothing -> throwError $ UnboundSymErr s
+evalSF "def" [SymT name, t] = SymT name <$ (modify ∘ extend name =<< evalT t)
+evalSF "def" [t,         _] = error $ ArgTyErr "def" symTy t
+evalSF "def" args           = error $ ArgcErr "def" (len args) (ArgcE 2)
 
-eval0 (LisT (x : xs)) = do
-  f    <- eval0 x
-  args <- mapM eval0 xs
-  apply f args
-
-eval0 x = return x
-
+-- Applicator
 apply (LisT (x : xs)) ys = apply x (xs ++ ys)
 
 apply (SymT s) xs
-  | length xs < arity = return $ LisT (SymT s : xs)
-  | otherwise         = f xs
+  | len xs < arity = return $ symApp s xs
+  | otherwise      = f xs
   where
-    (arity, f) = lookup s builtIns
-              ?: (0, \_ -> throwError (UnboundSymErr s))
+    (arity, f) = case (lookup s builtIns) of
+      Just b  → b
+      Nothing → (0, \_ → error $ UnboundSymErr s)
 
-apply (CloT e s b) (x : xs)
-  = local (extend s x e)
-  $ eval0 b >>= case xs 
-                  of [] -> return
-                     xs -> flip apply xs
+apply (AbsT v t) (x : xs) = do
+  r ← evalT (subst v (symApp "quote" [x]) t)
+  case xs of
+    [] → return r
+    xs → apply r xs
 
-apply t _ = throwError (NonApplicableErr t)
-
-eval = runEval . eval0
-
-evalString = either (error . pretty) (pretty . last)
-           . runEval . sequence . map eval0 . parse form
+apply t _ = error $ NonApplicableErr t
 
 -- Built-In's
-builtIns = fromList [ ("λ", (2, bLam))
-                    , ("+", (2, bAdd))
-                    , ("-", (2, bSub)) 
-                    , ("*", (2, bMul))
-                    , ("/", (2, bDiv)) 
-                    , ("=", (2, bEq))
-                    , ("<", (2, bLT)) 
-                    , (":", (2, bCons))
-                    
-                    , ("hd", (1, bHd))
-                    , ("tl", (1, bTl))
-                    
-                    , ("type-of", (1, bTypeOf))
-                    ]
+builtIns = fromList [
+  -- control
+  "λ" # 2 # bLam,
+  -- arith
+  "+" # 2 # bAdd,
+  "-" # 2 # bSub,
+  "*" # 2 # bMul,
+  "/" # 2 # bDiv,
+  -- equality
+  "=" # 2 # bEq,
+  "<" # 2 # bLT,
+  -- lists
+  ":"  # 2 # bCons,
+  "hd" # 1 # bHd,
+  "tl" # 1 # bTl,
+  -- reflection
+  "type-of" # 1 # bTypeOf
+ ]
+  where
+    infixr #
+    (#) = (,)
            
 -- Startup environment
-nilEnv :: Env
-nilEnv = fromList $ map selfEvaluated ("T" : syms builtIns)
-  where selfEvaluated x = (x, SymT x)
+nilEnv ∷ Env
+nilEnv = fromList $ map (id &&& SymT) ("T" : syms builtIns)
 
-(#) = undefined
+(#) = (#)
 
 intTy = IntT (#)
 lisTy = LisT (#)
 symTy = SymT (#)
 
-infErr fn ts@(length -> tc) xs@(length -> argc)
-  | tc /= argc = throwError $ ArgcErr fn argc (ArgcE tc)
-  | otherwise  = case find snd $ zipWith (\t a -> ((t,a), a `isnt` t)) ts xs of
-    Just ((t,a), _) -> throwError $ ArgTyErr fn t a
-    Nothing         -> throwError $ OtherErr "Incorrect error! :)"
+infErr fn ts@(len → tc) xs@(len → argc)
+  | tc ≢ argc = error $ ArgcErr fn argc (ArgcE tc)
+  | otherwise = case find snd $ zipWith (\t a → ((t,a), a `isnt` t)) ts xs of
+    Just ((t,a), _) → error $ ArgTyErr fn t a
+    Nothing         → error $ OtherErr "Incorrect error! :)"
   where
-    isnt obj ty = toConstr obj /= toConstr ty
+    isnt obj ty = toConstr obj ≢ toConstr ty
 
-bLam xs = eval0 $ LisT (SymT "λ" : xs) -- kinda black sorcery
+bLam xs = evalT $ LisT (SymT "λ" : xs)
 
 bAdd [IntT x, IntT y] = return $ IntT (x + y)
 bAdd xs               = infErr "+" [intTy, intTy] xs
@@ -155,10 +134,10 @@ bDiv [IntT x, IntT y] = return $ IntT (x `div` y)
 bDiv xs               = infErr "/" [intTy, intTy] xs
 
 bCons [hd, LisT tl]    = return $ LisT (hd : tl)
-bCons [_,  t      ]    = throwError $ ArgTyErr ":" lisTy t
-bCons xs               = throwError $ ArgcErr ":" (length xs) (ArgcE 2)
+bCons [_,  t      ]    = error $ ArgTyErr ":" lisTy t
+bCons xs               = error $ ArgcErr ":" (len xs) (ArgcE 2)
 
-bEq [a, b] | a == b    = return $ SymT "T"
+bEq [a, b] | a ≡ b    = return $ SymT "T"
            | otherwise = return $ LisT []
 
 bLT [IntT a, IntT b]
@@ -166,13 +145,13 @@ bLT [IntT a, IntT b]
   | otherwise = return $ LisT []
 bLT xs        = infErr "<" [intTy, intTy] xs
 
-bHd [LisT []   ] = throwError $ OtherErr "Empty list!"
+bHd [LisT []   ] = error $ OtherErr "Empty list!"
 bHd [LisT (x:_)] = return x
 bHd xs           = infErr "hd" [lisTy] xs
 
-bTl [LisT []    ] = throwError $ OtherErr "Empty list!"
+bTl [LisT []    ] = error $ OtherErr "Empty list!"
 bTl [LisT (_:xs)] = return $ LisT xs
 bTl xs            = infErr "tl" [lisTy] xs
 
-bTypeOf [t]              = return $ SymT (typeOf t)
-bTypeOf (length -> argc) = throwError $ ArgcErr "type-of" argc (ArgcE 1)
+bTypeOf [t] = return $ SymT (typeOf t)
+bTypeOf xs  = error $ ArgcErr "type-of" (len xs) (ArgcE 1)

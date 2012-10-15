@@ -1,0 +1,41 @@
+
+  (def [ '[)
+  (def ] '])
+
+  (def <~
+    (λ f m x
+      ((λ y
+         (? (Function? y)
+            (<~ f y)
+            (f y)))
+       (m x))))
+
+  (def vararg-collector/r
+    (λ acc x
+      (? (= x ])
+         (reverse acc)
+         (vararg-collector/r (: x acc)))))
+
+  (def vararg-collector/l
+    (λ acc n x
+      (? (= x [)
+         (vararg-collector/r ())
+         (? (< n 2)
+            (reverse (: x acc))
+            (vararg-collector/l
+              (: x acc)
+              (- n 1))))))
+
+  (def vararg-builder
+    (λ f n
+      (<~ f (vararg-collector/l () n))))
+
+  (def ~+ +)
+
+  (def + (vararg-builder (foldl1 ~+) 2))
+
+  (def t1 (+ [ 1 2 3))
+  (def t2 (t1 3 4 5 6))
+  (def t3 (t2 7 8 9 ]))
+
+  t3
